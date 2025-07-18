@@ -48,10 +48,10 @@ class GitHubAPIClient:
         
         self.Session = sessionmaker(bind=self.engine)
         
-        # Setup GraphQL client
-        headers = {"Authorization": f"Bearer {self.token}"}
-        transport = AIOHTTPTransport(url="https://api.github.com/graphql", headers=headers)
-        self.client = Client(transport=transport, fetch_schema_from_transport=True)
+        # Setup GraphQL client configuration
+        self.api_url = "https://api.github.com/graphql"
+        self.headers = {"Authorization": f"Bearer {self.token}"}
+        # We'll create a new client for each request instead of reusing one
         
         # Rate limit settings
         self.rate_limit_remaining = 5000  # Default GitHub rate limit
@@ -152,7 +152,10 @@ class GitHubAPIClient:
         logger.debug(f"GraphQL variables: {variables}")
         
         try:
-            result = self.client.execute(query, variable_values=variables)
+            # Create a new client for each request to avoid connection issues
+            transport = AIOHTTPTransport(url=self.api_url, headers=self.headers)
+            client = Client(transport=transport, fetch_schema_from_transport=True)
+            result = client.execute(query, variable_values=variables)
             
             # Update rate limit info
             if "rateLimit" in result:
@@ -442,8 +445,9 @@ class GitHubAPIClient:
             # Calculate z-scores and update commits
             for commit in commits:
                 if std_changes > 0:  # Avoid division by zero
+                    # Calculate z_score as a NumPy value but convert to Python float before storing
                     z_score = (commit.total_changes - mean_changes) / std_changes
-                    commit.z_score = z_score
+                    commit.z_score = float(z_score)  # Convert NumPy float64 to Python float
             
             session.commit()
             

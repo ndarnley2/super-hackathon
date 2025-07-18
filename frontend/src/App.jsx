@@ -14,7 +14,9 @@ import {
   getOutliers,
   getMetrics,
   getWordCloud,
-} from './services/api-mock';
+  getAuthors,
+  fetchData,
+} from './services/api';
 
 const theme = createTheme({
   palette: {
@@ -31,38 +33,90 @@ const theme = createTheme({
 function DashboardContainer() {
   const { startDate, endDate, loading, setLoading, cache, setCache } = useDateRange();
   const [author, setAuthor] = useState('');
-  const [outliers, setOutliers] = useState([]);
-  const [metrics, setMetrics] = useState({});
+  const [outliers, setOutliers] = useState(cache?.outliers || []);
+  const [metrics, setMetrics] = useState(cache?.metrics || {});
   const [metricType, setMetricType] = useState('commits');
-  const [wordCloud, setWordCloud] = useState([]);
+  const [wordCloud, setWordCloud] = useState(cache?.wordCloud || []);
+  const [authorsList, setAuthorsList] = useState([]);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
-
-  const authors = Array.from(new Set(outliers.map(o => o.author))).sort();
+  const [fetchMessage, setFetchMessage] = useState('');
 
   // Filter outliers by selected author only
   const filteredOutliers = author ? outliers.filter(o => o.author === author) : outliers;
+  
+  // Fetch authors separately to populate dropdown
+  const fetchAuthors = useCallback(async () => {
+    try {
+      const authors = await getAuthors({ startDate, endDate });
+      setAuthorsList(authors);
+      return authors;
+    } catch (error) {
+      console.error('Error fetching authors:', error);
+      return [];
+    }
+  }, [startDate, endDate]);
+
+  // Reload data from GitHub
+  const reloadFromGitHub = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await fetchData({
+        startDate, 
+        endDate,
+        useCache: false
+      });
+      
+      setFetchMessage(result.message);
+      
+      // If fetch was successful, reload all data
+      if (result.success) {
+        await fetchAll();
+      }
+      
+      setTimeout(() => setFetchMessage(''), 5000); // Clear message after 5 seconds
+      return result.success;
+    } catch (error) {
+      console.error('Error reloading data from GitHub:', error);
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }, [startDate, endDate, setLoading]);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [outliersRes, metricsRes, wordCloudRes] = await Promise.all([
+      const [outliersRes, metricsRes, wordCloudRes, authorsRes] = await Promise.all([
         getOutliers({ startDate, endDate }),
         getMetrics({ startDate, endDate, metricType, author }),
         getWordCloud({ startDate, endDate }),
+        fetchAuthors(),
       ]);
+      
       setOutliers(outliersRes);
       setMetrics(metricsRes);
       setWordCloud(wordCloudRes);
+      
+      // Store in cache for page reloads
       setCache({
         outliers: outliersRes,
         metrics: metricsRes,
         wordCloud: wordCloudRes,
+        authors: authorsRes,
       });
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      // Use cached data if available and fetch fails
+      if (cache) {
+        setOutliers(cache.outliers || []);
+        setMetrics(cache.metrics || {});
+        setWordCloud(cache.wordCloud || []);
+      }
     } finally {
       setLoading(false);
     }
-  }, [startDate, endDate, metricType, author, setLoading, setCache]);
+  }, [startDate, endDate, metricType, author, setLoading, setCache, cache, fetchAuthors]);
 
   useEffect(() => {
     fetchAll();
@@ -72,7 +126,12 @@ function DashboardContainer() {
     <>
       <PleaseWaitModal />
       <DateRangeSelector />
-      <ReloadButton onReload={fetchAll} />
+      {fetchMessage && (
+        <div style={{ margin: '10px 0', padding: '10px', backgroundColor: '#e3f2fd', borderRadius: '4px' }}>
+          {fetchMessage}
+        </div>
+      )}
+      <ReloadButton onReload={reloadFromGitHub} />
       <OutliersTable rows={filteredOutliers} page={page} setPage={setPage} rowsPerPage={rowsPerPage} setRowsPerPage={setRowsPerPage} />
       <MetricsChart
         data={metrics}
@@ -80,7 +139,7 @@ function DashboardContainer() {
         setMetricType={setMetricType}
         author={author}
         setAuthor={setAuthor}
-        authors={authors}
+        authors={authorsList}
         loading={loading}
       />
       <WordCloud words={wordCloud} />

@@ -32,7 +32,7 @@ Create a `.env` file in the project root with the following variables:
 GITHUB_TOKEN=your_github_personal_access_token
 
 # Database & Redis Configuration (these will be overridden by boot.sh)
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres
+DATABASE_URL=postgresql://postgres:postgres@localhost:5433/postgres
 REDIS_URL=redis://localhost:6379/0
 
 # Default Repository to Analyze
@@ -59,6 +59,39 @@ pip install -r backend/tests/requirements.txt
 ```bash
 docker-compose up -d
 ```
+
+## Running the Application
+
+### Running the Backend
+
+Use the provided script to start the backend API:
+
+```bash
+./run_backend.sh
+```
+
+The API will be available at http://localhost:5050/api/v1
+
+### Running the Frontend
+
+Use the provided script to start the frontend development server:
+
+```bash
+./run_frontend.sh
+```
+
+The frontend will be available at http://localhost:5173
+
+## Using the Application
+
+1. Start both the backend and frontend servers.
+2. Navigate to http://localhost:5173 in your browser.
+3. Use the date range selector to specify a period for analysis.
+4. Click the "Reload Data" button to fetch commit data from GitHub for the specified period.
+5. Explore the different visualizations:
+   - **Outliers Table**: Shows commits with unusual sizes (additions, deletions).
+   - **Metrics Chart**: Visualizes commit activity by day of week.
+   - **Word Cloud**: Displays frequently used words in commit messages.
 
 ### 6. Initialize the Database
 
