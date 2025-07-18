@@ -11,7 +11,13 @@ const metricTypes = [
 ];
 
 const MetricsChart = ({ data, metricType, setMetricType, author, setAuthor, authors, loading }) => {
-  const chartData = Object.entries(data).map(([day, value]) => ({ day, value }));
+  console.log('MetricsChart received data:', data);
+  console.log('MetricsChart data type:', typeof data);
+  
+  // Ensure data is an object before processing
+  const dataObj = data && typeof data === 'object' ? data : {};
+  const chartData = Object.entries(dataObj).map(([day, value]) => ({ day, value }));
+  console.log('Processed chartData:', chartData);
 
   return (
     <Box mb={4}>

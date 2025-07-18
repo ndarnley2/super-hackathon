@@ -94,7 +94,9 @@ function DashboardContainer() {
         fetchAuthors(),
       ]);
       
+      console.log('Outliers data received:', outliersRes);
       setOutliers(outliersRes);
+      console.log('Day of Week Metrics Response:', metricsRes);
       setMetrics(metricsRes);
       setWordCloud(wordCloudRes);
       

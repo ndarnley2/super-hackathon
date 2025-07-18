@@ -75,12 +75,13 @@ export async function getOutliers({ startDate, endDate, repoOwner = 'OpenRA', re
     });
     
     // Transform the response to match the expected format in the frontend
+    console.log('Raw outliers response:', response.data);
     return (response.data.commits || []).map(commit => ({
       sha: commit.sha,
-      title: commit.message_title,
+      title: commit.title, // The backend now sends 'title' instead of 'message_title'
       linesChanged: commit.total_changes,
-      date: new Date(commit.author_date).toISOString().split('T')[0],
-      author: commit.author_name,
+      date: new Date(commit.date).toISOString().split('T')[0], // Using 'date' from response
+      author: commit.author,
     }));
   } catch (error) {
     console.error('Error fetching outliers:', error);
@@ -119,9 +120,12 @@ export async function getMetrics({
       },
     });
     
-    return response.data.day_activity || {
+    console.log('Day of week API full response:', response.data);
+    const dayActivity = response.data.day_activity || {
       Sun: 0, Mon: 0, Tue: 0, Wed: 0, Thu: 0, Fri: 0, Sat: 0,
     };
+    console.log('Day activity extracted:', dayActivity);
+    return dayActivity;
   } catch (error) {
     console.error('Error fetching metrics:', error);
     return {

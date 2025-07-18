@@ -226,14 +226,18 @@ def get_day_of_week_activity(args):
         # Group by day of week and execute
         results = query.group_by('day_of_week').all()
         
-        # Convert to day names and fill in missing days
-        day_names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+        # Convert to shortened day names and fill in missing days
+        # Use shortened day names to match frontend expectations
+        day_names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
         day_activity = {day: 0 for day in day_names}
         
         for row in results:
             day_index = int(row.day_of_week)
             day_name = day_names[day_index]
             day_activity[day_name] = int(row.value) if row.value else 0
+            
+        # Add debug output
+        logger.info(f"Day activity data: {day_activity}")
         
         return {
             "metric": metric_type,
