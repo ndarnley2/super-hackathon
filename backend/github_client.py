@@ -10,7 +10,7 @@ import redis
 import json
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from models import Base, Commit, CacheStatus
+from models import Base, Commit, CacheStatus, CommitWordFrequency
 
 # Configure logging
 logging.basicConfig(
@@ -141,13 +141,15 @@ class GitHubAPIClient:
         self._check_rate_limit()
         
         query = self._get_commits_query()
+        # GitHub's GraphQL API requires GitTimestamp in RFC3339 format: YYYY-MM-DDTHH:MM:SSZ
         variables = {
             "owner": owner,
             "repo": repo,
             "after": after,
-            "since": since.isoformat() if since else None,
-            "until": until.isoformat() if until else None
+            "since": since.strftime('%Y-%m-%dT%H:%M:%SZ') if since else None,
+            "until": until.strftime('%Y-%m-%dT%H:%M:%SZ') if until else None
         }
+        logger.debug(f"GraphQL variables: {variables}")
         
         try:
             result = self.client.execute(query, variable_values=variables)
@@ -298,22 +300,30 @@ class GitHubAPIClient:
                         message_title = message_lines[0]
                         message_body = message_lines[1] if len(message_lines) > 1 else None
                         
-                        # Create a commit record
-                        commit_obj = Commit(
-                            sha=commit["oid"],
-                            author_name=commit["author"]["name"],
-                            author_email=commit["author"]["email"],
-                            author_date=datetime.fromisoformat(commit["author"]["date"].replace("Z", "+00:00")),
-                            message_title=message_title,
-                            message_body=message_body,
-                            additions=commit["additions"],
-                            deletions=commit["deletions"],
-                            total_changes=commit["additions"] + commit["deletions"],
-                            repository=repository
-                        )
+                        # Check if commit already exists in the database
+                        existing_commit = session.query(Commit).filter(Commit.sha == commit["oid"]).first()
                         
-                        # Add to session
-                        session.add(commit_obj)
+                        if existing_commit:
+                            # Commit already exists, update it if needed
+                            logger.debug(f"Commit {commit['oid']} already exists, skipping insert")
+                            commit_obj = existing_commit
+                        else:
+                            # Create a new commit record
+                            commit_obj = Commit(
+                                sha=commit["oid"],
+                                author_name=commit["author"]["name"],
+                                author_email=commit["author"]["email"],
+                                author_date=datetime.fromisoformat(commit["author"]["date"].replace("Z", "+00:00")),
+                                message_title=message_title,
+                                message_body=message_body,
+                                additions=commit["additions"],
+                                deletions=commit["deletions"],
+                                total_changes=commit["additions"] + commit["deletions"],
+                                repository=repository
+                            )
+                            
+                            # Add to session
+                            session.add(commit_obj)
                         
                         # Add to our return list
                         all_commits.append({
@@ -331,10 +341,16 @@ class GitHubAPIClient:
                     
                     # Update progress bar
                     if not pbar:
-                        # Initialize progress bar with total count if available
-                        pbar = tqdm(desc=f"Fetching commits for {repository}")
+                        # Initialize progress bar with an initial total (can be updated later)
+                        pbar = tqdm(total=100, desc=f"Fetching commits for {repository}")
                     
+                    # Update with actual progress
                     pbar.update(len(commits))
+                    # Update total if we know more commits are coming
+                    if page_info["hasNextPage"]:
+                        # If we have more pages, increase the total estimate
+                        new_total = pbar.n + 100
+                        pbar.total = max(pbar.total, new_total)
                     
                     # Call progress callback if provided
                     if progress_callback:

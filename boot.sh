@@ -26,10 +26,10 @@ fi
 
 # Check if containers are running
 echo -e "\n${YELLOW}Checking if required services are running...${NC}"
-docker-compose ps postgres redis > /dev/null 2>&1
+docker compose ps postgres redis > /dev/null 2>&1
 if [ $? -ne 0 ]; then
     echo -e "${YELLOW}Starting PostgreSQL and Redis services...${NC}"
-    docker-compose up -d postgres redis
+    docker compose up -d postgres redis
     
     # Wait for services to be ready
     echo -e "${YELLOW}Waiting for services to be ready...${NC}"
@@ -54,17 +54,21 @@ echo -e "\n${YELLOW}Installing backend dependencies...${NC}"
 pip install -r $BACKEND_DIR/requirements.txt
 
 # Set environment variables if .env file exists
-if [ -f ".env" ]; then
+if [ -f "$ROOT_DIR/.env" ]; then
     echo -e "\n${YELLOW}Loading environment variables from .env file...${NC}"
-    export $(grep -v '^#' .env | xargs)
+    source $ROOT_DIR/.env
 else
-    echo -e "\n${RED}Warning: .env file not found. Using default values.${NC}"
-    # Set default environment variables
-    export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/github_analytics"
-    export REDIS_URL="redis://localhost:6379/0"
-    export DEFAULT_REPO_OWNER="OpenRA"
-    export DEFAULT_REPO_NAME="OpenRA"
+    echo -e "\n${YELLOW}No .env file found, using default environment variables.${NC}"
 fi
+
+# ALWAYS use localhost for database and Redis connections when running API outside Docker
+export DATABASE_URL="postgresql://postgres:postgres@localhost:5433/postgres"
+export REDIS_URL="redis://localhost:6379/0"
+export DEFAULT_REPO_OWNER="OpenRA"
+export DEFAULT_REPO_NAME="OpenRA"
+
+echo "Using database URL: $DATABASE_URL"
+echo "Using Redis URL: $REDIS_URL"
 
 # Create data directory if it doesn't exist
 if [ ! -d "$DATA_DIR" ]; then
@@ -80,7 +84,7 @@ BACKEND_PID=$!
 cd ..
 
 echo -e "\n${GREEN}Backend server started with PID $BACKEND_PID${NC}"
-echo -e "${GREEN}API URL: http://localhost:5000/api/v1${NC}"
+echo -e "${GREEN}API URL: http://localhost:5050/api/v1${NC}"
 
 # Function to handle script termination
 function cleanup {

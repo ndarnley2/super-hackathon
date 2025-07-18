@@ -33,12 +33,13 @@ app.config["API_VERSION"] = "v1"
 app.config["OPENAPI_VERSION"] = "3.0.2"
 
 # Database configuration
-DB_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:postgres@postgres:5432/github_analytics")
+# Always use localhost since API runs directly on the host
+DB_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:postgres@localhost:5433/postgres")
 app.config["SQLALCHEMY_DATABASE_URI"] = DB_URL
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 # Redis configuration
-REDIS_URL = os.environ.get("REDIS_URL", "redis://redis:6379/0")
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
 # Initialize extensions
 db = SQLAlchemy(app)
@@ -46,7 +47,18 @@ api = Api(app)
 
 # Initialize GitHub client
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
-github_client = GitHubAPIClient(token=GITHUB_TOKEN, redis_url=REDIS_URL, db_url=DB_URL)
+print(f"GITHUB_TOKEN is {'set' if GITHUB_TOKEN else 'NOT set'}")
+print(f"DB_URL = {DB_URL}")
+print(f"REDIS_URL = {REDIS_URL}")
+
+try:
+    print("Initializing GitHub client...")
+    github_client = GitHubAPIClient(token=GITHUB_TOKEN, redis_url=REDIS_URL, db_url=DB_URL)
+    print("GitHub client initialized successfully")
+except Exception as e:
+    print(f"Error initializing GitHub client: {e}")
+    # Create a dummy client for testing - we'll only support the health endpoint
+    github_client = None
 
 # Default repository (can be overridden via environment variable)
 DEFAULT_REPO_OWNER = os.environ.get("DEFAULT_REPO_OWNER", "OpenRA")
@@ -91,6 +103,12 @@ blp = Blueprint(
     url_prefix="/api/v1",
     description="GitHub commit analytics API"
 )
+
+@blp.route('/health', methods=['GET'])
+def health_check():
+    """Simple health check endpoint"""
+    return {"status": "ok", "message": "API is running"}
+
 
 # Endpoint 1: Get unique commit authors
 @blp.route("/authors", methods=["GET"])
@@ -277,11 +295,26 @@ def fetch_data(args):
     """
     Fetch commit data from GitHub API
     """
-    start_date = args.get("start_date")
-    end_date = args.get("end_date")
-    repo_owner = args.get("repo_owner", DEFAULT_REPO_OWNER)
-    repo_name = args.get("repo_name", DEFAULT_REPO_NAME)
-    use_cache = args.get("use_cache", True)
+    # Parse date strings into datetime objects
+    try:
+        # If the dates come as strings (e.g. from JSON request), convert to datetime
+        start_date = args.get("start_date")
+        end_date = args.get("end_date")
+        
+        if isinstance(start_date, str):
+            start_date = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+        
+        if isinstance(end_date, str):
+            end_date = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            
+        repo_owner = args.get("repo_owner", DEFAULT_REPO_OWNER)
+        repo_name = args.get("repo_name", DEFAULT_REPO_NAME)
+        use_cache = args.get("use_cache", True)
+        
+        logger.debug(f"Parsed dates: start={start_date}, end={end_date}")
+    except Exception as e:
+        logger.error(f"Error parsing dates: {e}")
+        abort(400, message=f"Invalid date format: {str(e)}")
     
     try:
         # Check cache status
