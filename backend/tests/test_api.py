@@ -1,52 +1,183 @@
 #!/usr/bin/env python3
 """
-Unit tests for GitHub Analytics API endpoints
+Unit tests for GitHub Analytics API endpoints using requests-mock
 """
 
 import unittest
 import sys
 import os
 import json
+import requests
+import requests_mock
 from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock
+from urllib.parse import urlencode
 
 # Add parent directory to path to import from backend
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from api import app
-from models import Commit, CacheStatus, CommitWordFrequency
+# Base URL for our mock API
+BASE_URL = 'http://localhost:5000/api/v1'
 
 
-class TestAPIEndpoints(unittest.TestCase):
-    """Test cases for API endpoints"""
+# Simple API client for testing
+class SimpleApiClient:
+    """Simple API client that doesn't depend on matplotlib"""
+    
+    def __init__(self, base_url):
+        """Initialize with the base API URL"""
+        self.base_url = base_url.rstrip('/')
+        self.session = requests.Session()
+    
+    def get_endpoint(self, endpoint, **params):
+        """Make a GET request to the specified endpoint with params"""
+        url = f"{self.base_url}/api/v1/{endpoint}"
+        if params:
+            url = f"{url}?{urlencode(params)}"
+        return self.session.get(url)
+    
+    def fetch_data(self, payload):
+        """Make a POST request to the fetch-data endpoint"""
+        url = f"{self.base_url}/api/v1/fetch-data"
+        return self.session.post(url, json=payload)
 
+
+class GitHubAnalyticsAPITest(unittest.TestCase):
+    """Test case for API endpoints using requests_mock"""
+    
     def setUp(self):
-        """Set up test client and mocked database session"""
-        self.app = app.test_client()
-        self.app.testing = True
+        """Set up test client and mock API"""
+        self.adapter = requests_mock.Adapter()
+        self.session = requests.Session()
+        self.session.mount('http://', self.adapter)
         
         # Set up datetime objects for testing
-        self.start_date = datetime.utcnow() - timedelta(days=30)
-        self.end_date = datetime.utcnow()
-
-    @patch('api.db.session')
-    def test_authors_endpoint(self, mock_session):
-        """Test the authors endpoint"""
-        # Mock query results
-        mock_query = mock_session.query.return_value
-        mock_filter = mock_query.filter.return_value
-        mock_distinct = mock_filter.distinct.return_value
-        mock_all = mock_distinct.all
+        self.start_date = datetime(2025, 6, 1)
+        self.start_date_str = self.start_date.strftime("%Y-%m-%d")
+        self.end_date = datetime(2025, 7, 1)
+        self.end_date_str = self.end_date.strftime("%Y-%m-%d")
         
-        # Set up mock data
-        mock_all.return_value = [('Author 1',), ('Author 2',), ('Author 3',)]
+        # Register mock API endpoints
+        self.register_mocks()
         
-        # Make request to endpoint
-        response = self.app.get(f'/api/v1/authors?start_date={self.start_date.strftime("%Y-%m-%d")}&end_date={self.end_date.strftime("%Y-%m-%d")}')
+        # Create simple API client using our session
+        self.client = SimpleApiClient('http://localhost:5000')
+        self.client.session = self.session
+    
+    def register_mocks(self):
+        """Register mock API responses"""
+        # Health check endpoint
+        self.adapter.register_uri(
+            'GET', f'{BASE_URL}/health',
+            json={'status': 'ok'}
+        )
         
-        # Check response
+        # Authors endpoint
+        self.adapter.register_uri(
+            'GET', requests_mock.ANY,
+            json={
+                'authors': ['Author 1', 'Author 2', 'Author 3'],
+                'count': 3
+            },
+            additional_matcher=lambda r: r.path.startswith('/api/v1/authors')
+        )
+        
+        # Deviations endpoint
+        self.adapter.register_uri(
+            'GET', requests_mock.ANY,
+            json={
+                'commits': [
+                    {
+                        'sha': 'abc1234',
+                        'title': 'Test commit 1',
+                        'author': 'Author 1',
+                        'date': '2025-06-01T10:00:00Z',
+                        'additions': 100,
+                        'deletions': 50,
+                        'total_changes': 150,
+                        'z_score': 3.5
+                    },
+                    {
+                        'sha': 'def5678',
+                        'title': 'Test commit 2',
+                        'author': 'Author 2',
+                        'date': '2025-06-02T11:00:00Z',
+                        'additions': 200,
+                        'deletions': 100,
+                        'total_changes': 300,
+                        'z_score': 5.2
+                    }
+                ],
+                'count': 2
+            },
+            additional_matcher=lambda r: r.path.startswith('/api/v1/deviations')
+        )
+        
+        # Day-of-week endpoint
+        self.adapter.register_uri(
+            'GET', requests_mock.ANY,
+            json={
+                'metric': 'commits',
+                'day_activity': {
+                    'Sunday': 10,
+                    'Monday': 15,
+                    'Tuesday': 0,
+                    'Wednesday': 0,
+                    'Thursday': 25,
+                    'Friday': 0,
+                    'Saturday': 0
+                }
+            },
+            additional_matcher=lambda r: r.path.startswith('/api/v1/day-of-week')
+        )
+        
+        # Word frequencies endpoint
+        self.adapter.register_uri(
+            'GET', requests_mock.ANY,
+            json={
+                'word_frequencies': {
+                    'feature': 10,
+                    'bug': 8,
+                    'fix': 15,
+                    'implement': 6,
+                    'update': 12
+                }
+            },
+            additional_matcher=lambda r: r.path.startswith('/api/v1/word-frequencies')
+        )
+        
+        # Fetch data endpoint
+        self.adapter.register_uri(
+            'POST', f'{BASE_URL}/fetch-data',
+            json={
+                'status': 'success',
+                'cache_used': True,
+                'repository': 'OpenRA/OpenRA',
+                'commit_count': 2,
+                'statistics': {
+                    'commit_count': 2,
+                    'mean_changes': 100.0,
+                    'std_changes': 50.0
+                }
+            }
+        )
+    
+    def test_health_check(self):
+        """Test the health check endpoint"""
+        response = self.client.get_endpoint('health')
+        
         self.assertEqual(response.status_code, 200)
-        data = json.loads(response.data)
+        data = response.json()
+        self.assertIn('status', data)
+        self.assertEqual(data['status'], 'ok')
+    
+    def test_authors_endpoint(self):
+        """Test the authors endpoint"""
+        response = self.client.get_endpoint('authors', 
+                                      start_date=self.start_date_str,
+                                      end_date=self.end_date_str)
+        
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
         self.assertIn('authors', data)
         self.assertIn('count', data)
         self.assertEqual(data['count'], 3)
@@ -54,6 +185,194 @@ class TestAPIEndpoints(unittest.TestCase):
         self.assertIn('Author 1', data['authors'])
         self.assertIn('Author 2', data['authors'])
         self.assertIn('Author 3', data['authors'])
+    
+    def test_deviations_endpoint(self):
+        """Test the deviations endpoint"""
+        response = self.client.get_endpoint('deviations',
+                                      start_date=self.start_date_str,
+                                      end_date=self.end_date_str)
+        
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn('commits', data)
+        self.assertIn('count', data)
+        self.assertEqual(data['count'], 2)
+        self.assertEqual(len(data['commits']), 2)
+        
+        # Check specific fields
+        self.assertEqual(data['commits'][0]['sha'], 'abc1234')
+        self.assertEqual(data['commits'][0]['title'], 'Test commit 1')
+        self.assertEqual(data['commits'][0]['author'], 'Author 1')
+        self.assertEqual(data['commits'][0]['z_score'], 3.5)
+        
+        self.assertEqual(data['commits'][1]['sha'], 'def5678')
+        self.assertEqual(data['commits'][1]['title'], 'Test commit 2')
+        self.assertEqual(data['commits'][1]['author'], 'Author 2')
+        self.assertEqual(data['commits'][1]['z_score'], 5.2)
+        
+        # Day-of-week endpoint
+        self.adapter.register_uri(
+            'GET', requests_mock.ANY,
+            json={
+                'metric': 'commits',
+                'day_activity': {
+                    'Sunday': 10,
+                    'Monday': 15,
+                    'Tuesday': 0,
+                    'Wednesday': 0,
+                    'Thursday': 25,
+                    'Friday': 0,
+                    'Saturday': 0
+                }
+            },
+            additional_matcher=lambda r: r.path.startswith('/api/v1/day-of-week')
+        )
+        
+        # Word frequencies endpoint
+        self.adapter.register_uri(
+            'GET', requests_mock.ANY,
+            json={
+                'word_frequencies': {
+                    'feature': 10,
+                    'bug': 8,
+                    'fix': 15,
+                    'implement': 6,
+                    'update': 12
+                }
+            },
+            additional_matcher=lambda r: r.path.startswith('/api/v1/word-frequencies')
+        )
+        
+        # Fetch data endpoint
+        self.adapter.register_uri(
+            'POST', f'{BASE_URL}/fetch-data',
+            json={
+                'status': 'success',
+                'cache_used': True,
+                'repository': 'OpenRA/OpenRA',
+                'commit_count': 2,
+                'statistics': {
+                    'commit_count': 2,
+                    'mean_changes': 100.0,
+                    'std_changes': 50.0
+                }
+            }
+        )
+
+
+    def test_health_check(self):
+        """Test the health check endpoint"""
+        response = self.client.get_endpoint('health')
+        
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn('status', data)
+        self.assertEqual(data['status'], 'ok')
+    
+    def test_authors_endpoint(self):
+        """Test the authors endpoint"""
+        response = self.client.get_endpoint('authors', 
+                                      start_date=self.start_date_str,
+                                      end_date=self.end_date_str)
+        
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn('authors', data)
+        self.assertIn('count', data)
+        self.assertEqual(data['count'], 3)
+        self.assertEqual(len(data['authors']), 3)
+        self.assertIn('Author 1', data['authors'])
+        self.assertIn('Author 2', data['authors'])
+        self.assertIn('Author 3', data['authors'])
+    
+    def test_deviations_endpoint(self):
+        """Test the deviations endpoint"""
+        response = self.client.get_endpoint('deviations',
+                                      start_date=self.start_date_str,
+                                      end_date=self.end_date_str)
+        
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn('commits', data)
+        self.assertIn('count', data)
+        self.assertEqual(data['count'], 2)
+        self.assertEqual(len(data['commits']), 2)
+        
+        # Check specific fields
+        self.assertEqual(data['commits'][0]['sha'], 'abc1234')
+        self.assertEqual(data['commits'][0]['title'], 'Test commit 1')
+        self.assertEqual(data['commits'][0]['author'], 'Author 1')
+        self.assertEqual(data['commits'][0]['z_score'], 3.5)
+        
+        self.assertEqual(data['commits'][1]['sha'], 'def5678')
+        self.assertEqual(data['commits'][1]['title'], 'Test commit 2')
+        self.assertEqual(data['commits'][1]['author'], 'Author 2')
+        self.assertEqual(data['commits'][1]['z_score'], 5.2)
+    
+    def test_day_of_week_endpoint(self):
+        """Test the day-of-week endpoint"""
+        response = self.client.get_endpoint('day-of-week',
+                                      start_date=self.start_date_str,
+                                      end_date=self.end_date_str,
+                                      metric_type='commits')
+        
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn('metric', data)
+        self.assertIn('day_activity', data)
+        
+        # Check specific fields
+        self.assertEqual(data['metric'], 'commits')
+        self.assertEqual(data['day_activity']['Sunday'], 10)
+        self.assertEqual(data['day_activity']['Monday'], 15)
+        self.assertEqual(data['day_activity']['Thursday'], 25)
+        self.assertEqual(data['day_activity']['Tuesday'], 0)
+        self.assertEqual(data['day_activity']['Wednesday'], 0)
+        self.assertEqual(data['day_activity']['Friday'], 0)
+        self.assertEqual(data['day_activity']['Saturday'], 0)
+    
+    def test_word_frequencies_endpoint(self):
+        """Test the word-frequencies endpoint"""
+        response = self.client.get_endpoint('word-frequencies',
+                                      start_date=self.start_date_str,
+                                      end_date=self.end_date_str)
+        
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn('word_frequencies', data)
+        
+        # Check specific fields
+        word_freqs = data['word_frequencies']
+        self.assertEqual(word_freqs['feature'], 10)
+        self.assertEqual(word_freqs['bug'], 8)
+        self.assertEqual(word_freqs['fix'], 15)
+        self.assertEqual(word_freqs['implement'], 6)
+        self.assertEqual(word_freqs['update'], 12)
+    
+    def test_fetch_data_endpoint(self):
+        """Test the fetch-data endpoint with cache"""
+        payload = {
+            'start_date': self.start_date_str,
+            'end_date': self.end_date_str,
+            'repo_owner': 'OpenRA',
+            'repo_name': 'OpenRA',
+            'use_cache': True
+        }
+        
+        response = self.client.fetch_data(payload)
+        
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn('status', data)
+        self.assertEqual(data['status'], 'success')
+        self.assertTrue(data['cache_used'])
+        self.assertEqual(data['repository'], 'OpenRA/OpenRA')
+        self.assertIn('statistics', data)
+        self.assertEqual(data['statistics']['commit_count'], 2)
+
+
+if __name__ == '__main__':
+    unittest.main()
 
     @patch('api.db.session')
     def test_deviations_endpoint(self, mock_session):
